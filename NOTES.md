@@ -17,7 +17,7 @@ in cash through the decline.
 | Momentum lookback | 60 bars | 60-min return is the burst signal; 30/45/90-min lookbacks scored worse |
 | Burst threshold | +0.75% | 0.70–0.80% plateau at +0.42–0.43%; 0.60% loses (−0.40%, extra losing trade); 0.90% only +0.12% |
 | Position size | 100% of equity | Size sweep: 50% → +0.16%, 75% → +0.21%, 100% → +0.25% (pre-TP baseline) |
-| Take profit | sell 50% at +0.6% over cost | TP grid: +0.5/+0.6/+0.7% all ≈ +0.43–0.44% (plateau, not knife-edge); no-TP baseline +0.25% |
+| Take profit | sell 50% at +0.6% over cost; second tier sells 50% of remainder at +0.9% (see Revision) | TP grid: +0.5/+0.6/+0.7% all ≈ +0.43–0.44% (plateau, not knife-edge); no-TP baseline +0.25% |
 | Trailing stop | 0.8% below peak value | 0.8% and 1.2% identical on dev; 0.3% gives +0.23% with lower drawdown |
 | Stop-loss | −1.0% vs cost | Never triggered on dev (0.8–2.0% all identical); safety net only |
 | Max hold | 360 bars | 240 → +0.41%, 360 → +0.43%, 480 → −0.24% (trail-only exit is worse) |
@@ -94,6 +94,52 @@ window. This bot passes the dev gate (+0.42% > $0) with 3 trades and
 0.33% max drawdown, and its behaviour — one selective entry, disciplined
 exits, flat through downtrends — is the part designed to generalise to
 the unseen race window.
+
+## Revision (2026-11-12 ~22:55 WIB — fixes `license_osi` and `thinking_revised`)
+
+### LICENSE
+Added the line `SPDX-License-Identifier: MIT` under the `MIT License`
+heading. MIT text otherwise untouched.
+
+### main.py — second take-profit tier (genuine change, not a parameter shuffle)
+New parameter `TAKE_PROFIT2_PCT = 0.009` and state flag `took_profit2`:
+once the first take-profit has fired, if the position's value reaches
++0.9% over cost, sell half of the remainder (25% of the original
+position); the last quarter keeps riding behind the trailing stop /
+stop-loss / max-hold. Rationale: the dev rally's peak close is +0.847%
+over the entry close, so the tier is deliberately set *above* everything
+the dev window does — it cannot be a fit to this window's noise, it only
+pays if the unseen race window rallies further than dev did.
+
+Candidates tested with the exact-integer driver (2 runs each, all
+deterministic) and REJECTED as hair wins, stated plainly:
+- TP +0.7% (was +0.6%): +4.3296 USDC (+0.433%) but maxDD doubles to
+  0.66% — the TP misses the first peak (74,620 vs the +0.7% level 74,649)
+  and only fires on a late retest at bar 414. A +0.013 pp gain that
+  depends on a later retest barely clearing the level is a knife-edge,
+  not a plateau win.
+- Burst threshold 0.70% (was 0.75%): +4.2165 USDC (+0.422%), maxDD
+  0.37% — a +0.002 pp gain for a slightly higher drawdown; also a hair.
+- TP +0.5%: byte-identical to baseline (+4.2031, same fills) — no change.
+- Burst 0.70% + TP +0.7% combined: +4.3430 (+0.434%), maxDD 0.66% —
+  same knife-edge mechanism, rejected for the same reason.
+
+### Driver numbers, before vs after the revision
+| | Before | After (second TP tier) |
+|---|---|---|
+| Net PnL | +4.2031 USDC (+0.420%) | +4.2031 USDC (+0.420%) — unchanged, tier never fires on dev |
+| Trades | 3 | 3 |
+| Fees | 0.8018 USDC | 0.8018 USDC |
+| Max DD | 0.33% | 0.33% |
+| Max decision | 53.7–61.7 ms/bar | 39.3 ms/bar (run-to-run jitter; far under 20 s/bar) |
+| Rejected orders | 0 | 0 |
+| Fills | BUY bar 91 @ 74,130.71; SELL 50% bar 160 @ 74,620.39; SELL rest bar 451 @ 74,383.37 | identical fills, identical bars |
+| Determinism | 2 runs, reply bytes identical | 2 runs, reply bytes identical |
+
+Position flat from bar 451 of 1,439 — well before window end; no crash
+on any bar. Honest statement: no candidate improved dev PnL robustly,
+so the revision keeps dev PnL exactly equal and adds upside capture
+only for a stronger-than-dev rally in the race window.
 
 ## Discrepancies found (kit vs brief)
 

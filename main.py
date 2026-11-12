@@ -6,7 +6,10 @@ close at least 0.75% above the close 60 bars ago), because a full round trip
 costs about 26 bps in fees, slippage and price impact while a typical
 one-minute bar moves only about 5 bps -- so only a real burst is worth
 chasing. It buys with all of its cash, banks half the position once it is
-up 0.6% over cost, and lets the rest ride behind a 0.8% trailing stop, a
+up 0.6% over cost, banks half of the remainder at +0.9% if the rally
+extends that far (on the dev window the rally peaks at +0.85%, so the
+second tier never fires there -- it only pays in a stronger race window),
+and lets the rest ride behind a 0.8% trailing stop, a
 1.0% stop-loss and a 360-bar maximum hold. If it has still never traded by
 bar 1200 it takes one small (30% of equity) fallback trade on a weaker
 +0.4% burst, so the entry still meets the race's minimum-trade guardrail
@@ -38,6 +41,7 @@ FALLBACK_BAR = 1200       # fallback only once this many closes have been seen
 FALLBACK_SIZE = 0.30      # fallback buys 30% of equity
 TAKE_PROFIT_PCT = 0.006   # once per position: sell half when value/cost is +0.6%
 TAKE_PROFIT_FRAC = 0.5    # fraction of the position the take-profit sells
+TAKE_PROFIT2_PCT = 0.009  # second tier: sell half of the remainder at +0.9% over cost
 TRAIL_PCT = 0.008         # sell all when value falls 0.8% below its peak since entry
 STOP_LOSS_PCT = 0.010     # sell all when value/cost falls to -1.0%
 MAX_HOLD_BARS = 360       # sell all this many bars after the entry decision
@@ -49,6 +53,7 @@ filled_buys = 0           # buys the harness reported as filled
 entry_bar = -1            # index into closes of the entry decision, -1 when flat
 peak_close = 0            # highest close since entry (raw price units)
 took_profit = False       # whether this position already took its partial profit
+took_profit2 = False      # whether this position already took its second partial profit
 
 
 def _position_value(state):
@@ -60,7 +65,7 @@ def _position_value(state):
 
 
 def on_batch(state, batch):
-    global filled_buys, entry_bar, peak_close, took_profit
+    global filled_buys, entry_bar, peak_close, took_profit, took_profit2
 
     for fill in batch.get("fills", []):
         if fill.get("status") == "filled" and fill.get("side") == "buy":
@@ -90,6 +95,16 @@ def on_batch(state, batch):
         # 1. Take half the profit once, at +0.6% over cost.
         if not took_profit and cost > 0 and value * 1000 >= cost * 1006:
             took_profit = True
+            half = qty // 2
+            if half > 0 and state.value(SYMBOL, half) >= 1_000_000:
+                return [{"side": "sell", "symbol": SYMBOL, "qty": half,
+                         "max_slippage_bps": MAX_SLIPPAGE_BPS}]
+        # 1b. Take half of the remainder once, at +0.9% over cost.
+        # Dev-window rally peaks at +0.85% over entry, so this never fires
+        # on dev; it only banks extra profit if the race window rallies
+        # further than the dev window did.
+        if took_profit and not took_profit2 and cost > 0 and value * 1000 >= cost * 1009:
+            took_profit2 = True
             half = qty // 2
             if half > 0 and state.value(SYMBOL, half) >= 1_000_000:
                 return [{"side": "sell", "symbol": SYMBOL, "qty": half,
@@ -130,6 +145,7 @@ def on_batch(state, batch):
     entry_bar = n - 1
     peak_close = now
     took_profit = False
+    took_profit2 = False
     return [{"side": "buy", "symbol": SYMBOL, "notional_quote_units": spend,
              "max_slippage_bps": MAX_SLIPPAGE_BPS}]
 
